@@ -42,7 +42,7 @@ std::string gettime ()
   time (&rawtime);
   timeinfo = localtime(&rawtime);
 
-  strftime(buffer,sizeof(buffer),"%b %d %r",timeinfo);
+  strftime(buffer,sizeof(buffer),"%D %T",timeinfo);
   std::string str(buffer);
 
   return str;
@@ -252,17 +252,17 @@ void generate_random_number(std::string& random) {
 		random.push_back((int)(49+rand()%9));
 }
 
-std::string generate_message_one_nosign(const std::string& random, const std::string& message, const std::string& b_name) {
+std::string generate_message_one_nosign(const std::string& random, const std::string& message/*, const std::string& b_name*//*, const std::string& time*/) {
   std::string text3("serverA    ");
 	std::cout<<"Random number : "<<random<<std::endl;
-	std::string result = random + message + b_name + "serverA   ";
+	std::string result = random + message/* + b_name */+ "serverA   ";
 	
 	return result;
 }
 
-std::string generate_message_one_sign(const std::string& random, const std::string& message, const std::string& b_name) {
+std::string generate_message_one_sign(const std::string& random, const std::string& message/*, const std::string& b_name*//*, const std::string& time*/) {
   std::string text3("serverA    ");
-	std::string result = random + message + b_name + text2;
+	std::string result = random + message/* + b_name*/ + "serverA   ";
 	
 	return result;
 }
@@ -327,44 +327,52 @@ void process_connection(int socket, struct sockaddr_in& stSockAddr, std::string&
 	DASSERT((i32ConnectFD > 0), "Ошибка принятия");
 	std::cout<<"Client has connected"<<std::endl;
 	//---------------------------------------------------------------------------------------------------------
+	/****received client message****/
 	usleep(microseconds);
 	int read_bytes = read(i32ConnectFD, recv_buff, 200);
 	DEBUG_ONLY(std::cout<<"Received bytes number : "<<read_bytes<<std::endl);
 	usleep(microseconds);
+	
+	
 	std::string nonceRB;
-	std::string B_name;
+	std::string text_1;
+	/****get data*****/
 	for (int i = 0; i < (read_bytes - name); i++)
 		nonceRB.push_back(recv_buff[i]);
 	for (int i = (read_bytes - name); i < read_bytes; i++) {
-			B_name.push_back(recv_buff[i]);
+			text_1.push_back(recv_buff[i]);
 	}
+	
+	
 	DEBUG_ONLY(std::cout<<"Received nonce :"<<nonceRB<<std::endl);
 	usleep(microseconds);
-	DEBUG_ONLY(std::cout<<"Received B name : "<<B_name<<std::endl);
+	DEBUG_ONLY(std::cout<<"Received text_1 : "<<text_1<<std::endl);
 	usleep(microseconds);
 	
-	std::cout<<B_name.substr(6, B_name.find(" ") - 6)<<std::endl;
-	int clientNum = std::stoi(B_name.substr(6, B_name.find(" ") - 6));
 	
-	RSA* public_key = read_public_key(1);
 	std::string random;
 	generate_random_number(random);
+	std::string time_point_1 = gettime();
 	std::string nonceRA = random;
 	
-	std::string server_answer_1 = generate_message_one_sign(random, nonceRB, B_name);
-	std::string server_answer_2 = generate_message_one_nosign(random, nonceRB, B_name);
+	/*****generate signed and unsigned answer****/
+	std::string server_answer_1 = generate_message_one_sign(random, nonceRB/*, B_name*//*, time_point_1*/);
+	std::string server_answer_2 = generate_message_one_nosign(random, nonceRB/*, B_name*//*, time_point_1*/);
 	
+	/**sign message***/
 	unsigned char* enc_msg;
 	size_t enc_length;
 	RSASign(private_key, (unsigned char*)server_answer_1.c_str(), server_answer_1.length(), &enc_msg, &enc_length);
 	DEBUG_ONLY(std::cout<<"Encrypted message length : "<< enc_length<<std::endl);
 	usleep(microseconds);
 	
+	/**debug print***/
 	copy_value(enc_msg, enc_length, server_answer_2);
 	std::ofstream out("test");
 	DEBUG_ONLY(out<<"Server answer is : "<<server_answer_2<<std::endl);
 	usleep(microseconds);
 	
+	/***send message**/
 	int written_bytes = write(i32ConnectFD, server_answer_2.c_str(), server_answer_2.length());
 	DEBUG_ONLY(std::cout<<"Sent bytes number : "<<written_bytes<<std::endl);
 	usleep(microseconds);
@@ -374,7 +382,39 @@ void process_connection(int socket, struct sockaddr_in& stSockAddr, std::string&
 	DEBUG_ONLY(std::cout<<"Received bytes number(second received message) : "<<read_bytes<<std::endl);
 	usleep(microseconds);
 	
-		/*****ensure key posession***/
+	std::string received_nonceRA;
+	std::string received_nonceRB;
+	std::string received_B;
+	
+	
+	//std::string received_time;
+	int nonce_size = (read_bytes - 256 - 10)/2;
+	for (int i = 0; i < nonce_size; i++)
+		received_nonceRB.push_back(recv_buff[i]);
+	for (int i = nonce_size; i < 2*nonce_size; i++)
+		received_nonceRA.push_back(recv_buff[i]);
+	for (int i = 2*nonce_size; i < 2*nonce_size + 10; i++)
+		received_B.push_back(recv_buff[i]);
+
+	DEBUG_ONLY(std::cout<<"Received A nonce : "<<received_nonceRA<<std::endl);
+	usleep(microseconds);
+	DEBUG_ONLY(std::cout<<"Received B nonce : "<<received_nonceRB<<std::endl);
+	usleep(microseconds);
+	DEBUG_ONLY(std::cout<<"Received B name : "<<received_B<<std::endl);
+	usleep(microseconds);
+
+	std::string encrypted_message;
+	for (int i = (2*nonce_size + 10); i < read_bytes; i++)
+		encrypted_message.push_back(recv_buff[i]);
+	
+	/******verification****/
+	std::string message_to_verify = received_nonceRB + received_nonceRA + received_B/* + text4*/;
+	
+	std::cout<<received_B.substr(6, received_B.find(" ") - 6)<<std::endl;
+	int clientNum = std::stoi(received_B.substr(6, received_B.find(" ") - 6));
+
+	RSA* public_key = read_public_key(1);
+	/*****ensure key posession***/
 	EVP_PKEY* pubKey  = EVP_PKEY_new();//-аллоцируется память для публичного ключа
   EVP_PKEY_assign_RSA(pubKey, public_key);
 	DASSERT(isValidPublicKeyOnly(pubKey), "SERVER IS IN POSESSION OF AN INVALID PUBLIC KEY");
@@ -382,36 +422,19 @@ void process_connection(int socket, struct sockaddr_in& stSockAddr, std::string&
 	usleep(microseconds);
 	/*****End********************/
 	
-	std::string received_nonceRA;
-	std::string received_nonceRB;
-	std::string received_A;
-	int nonce_size = (read_bytes - 256 - 2*10)/2;
-	for (int i = 0; i < nonce_size; i++)
-		received_nonceRB.push_back(recv_buff[i]);
-	for (int i = nonce_size; i < 2*nonce_size; i++)
-		received_nonceRA.push_back(recv_buff[i]);
-	for (int i = 2*nonce_size; i < 2*nonce_size + 10; i++)
-		received_A.push_back(recv_buff[i]);
-	DEBUG_ONLY(std::cout<<"Received A nonce : "<<received_nonceRA<<std::endl);
-	usleep(microseconds);
-	DEBUG_ONLY(std::cout<<"Received B nonce : "<<received_nonceRB<<std::endl);
-	usleep(microseconds);
-	DEBUG_ONLY(std::cout<<"Received A name : "<<received_A<<std::endl);
-	usleep(microseconds);
-	
-	DASSERT(received_A == "serverA   ", "NAMES OF SERVER IDENTFIERS ARE DIFFERENT");
-	DASSERT(received_nonceRA == nonceRA, "NONCE RECEIVED VALUE AND SERVER VALUE ARE DIFFERENT");
-	
-	std::string encrypted_message;
-	for (int i = (2*nonce_size + 20); i < read_bytes; i++)
-		encrypted_message.push_back(recv_buff[i]);
-	
-	/******verification****/
-	std::string message_to_verify = received_nonceRB + received_nonceRA + received_A + text4;
 	bool auth;
 	int result = RSAVerifySignature(public_key, (unsigned char*)encrypted_message.c_str(), encrypted_message.length(), message_to_verify.c_str(), message_to_verify.length(), &auth);
+	DASSERT(received_nonceRA == nonceRA, "NONCE RECEIVED VALUE AND SERVER VALUE ARE DIFFERENT");
+	DASSERT(received_nonceRB == nonceRB, "NONCE RECEIVED VALUE IN THE FISRT AND IN THE LAST MESSAGE ARE DIFFERENT");
+	DEBUG_ONLY(std::cout<<"RECEIVED NONCE IS EQUAL TO THE ORIGINAL"<<std::endl);
+	DEBUG_ONLY(std::cout<<"RECEIVED NONCE IS EQUAL TO ONE, RECEIVED IN THE FIRST MESSAGE"<<std::endl);
 	
 	DEBUG_ONLY(std::cout<<"The result of comparision : "<<(result && auth)<<std::endl);
+	if ((result&&auth) == 0)
+	{
+		std::cout<<"REGISTRATION FAILED"<<std::endl;
+		abort();
+	}
 	usleep(microseconds);
 	if(result&&auth) 
 		std::cout<<"CLIENT IS REGISTERED"<<std::endl;
